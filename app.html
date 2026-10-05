@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fantômes — Ton audit</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--encre:#1b1a17;--papier:#f6f1e7;--braise:#d9381e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papier);color:var(--encre);font:18px/1.5 system-ui,sans-serif}
+main{max-width:34rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+.marque,h1{font-family:Georgia,serif;font-weight:700}
+h1{font-size:2rem;line-height:1.1;margin:1.2rem 0 .6rem}
+.cta{display:block;background:var(--braise);color:#fff;text-align:center;font-weight:700;padding:1.1rem;border-radius:.6rem;border:0;width:100%;font-size:1.1rem}
+#tot{position:sticky;top:0;background:var(--encre);color:var(--papier);padding:.8rem 1rem;border-radius:.6rem;margin:1rem 0}
+#tot b{color:#fff;font-size:1.3rem}
+.c{border-top:1px solid #d8d0bf;padding:1rem 0}
+.c h2{font:700 1.1rem Georgia,serif;margin:0}
+.an{color:var(--braise);font-weight:700}
+.c label{display:inline-block;margin-right:1rem}
+.c button{background:none;border:2px solid var(--encre);border-radius:.5rem;padding:.5rem .9rem;font-size:1rem}
+textarea{width:100%;height:16rem;margin-top:.7rem;font:15px/1.4 system-ui;padding:.7rem}
+small{color:#6b655a}
+</style></head><body><main>
+<div class="marque">Fantômes</div>
+<h1>Dépose ton relevé</h1>
+<p>Fichier CSV exporté depuis ta banque. Il reste sur ton téléphone : rien n'est envoyé ni conservé.</p>
+<label class="cta" for="f">Choisir mon relevé (CSV)</label>
+<input id="f" type="file" accept=".csv,text/csv,text/plain" hidden>
+<p id="msg"></p>
+<div id="tot" hidden></div>
+<div id="liste"></div>
+</main>
+<script>
+const $=i=>document.getElementById(i);
+const eur=n=>n.toLocaleString('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:0});
+const med=a=>{a=[...a].sort((x,y)=>x-y);return a[Math.floor(a.length/2)]};
+function split(l,d){const r=[];let c='',q=false;for(const ch of l){if(ch=='"')q=!q;else if(ch==d&&!q){r.push(c);c=''}else c+=ch}r.push(c);return r.map(s=>s.trim())}
+function num(s){s=(s||'').replace(/[^\d,.\-]/g,'');if(!s)return NaN;if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');return parseFloat(s)}
+function dt(s){s=s||'';let m=s.match(/(\d{2})[\/.-](\d{2})[\/.-](\d{4})/);if(m)return new Date(+m[3],m[2]-1,+m[1]);m=s.match(/(\d{4})-(\d{2})-(\d{2})/);return m?new Date(+m[1],m[2]-1,+m[3]):null}
+const STOP=/\b(PRLV|SEPA|PRELEVEMENT|CARTE|CB|PAIEMENT|PAR|DE|DU|LE|LA|ECH|FACTURE|REF|MANDAT|VIR|INST|EUR)\b/g;
+function cle(l){return (l||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\d+/g,' ').replace(/[^A-Z ]/g,' ').replace(STOP,' ').split(/\s+/).filter(Boolean).slice(0,3).join(' ')}
+function analyser(txt){
+ const L=txt.replace(/^\uFEFF/,'').split(/\r?\n/).filter(l=>l.trim());
+ const ech=L.slice(0,10).join('\n');
+ const d=[';',',','\t'].sort((a,b)=>ech.split(b).length-ech.split(a).length)[0];
+ const hi=L.findIndex(l=>split(l,d).some(c=>/date/i.test(c)));
+ if(hi<0)return null;
+ const h=split(L[hi],d).map(s=>s.toLowerCase());
+ const ci=re=>h.findIndex(c=>re.test(c));
+ const iD=ci(/date/),iL=ci(/libell|label|description|d[ée]tail|op[ée]ration|intitul/),iM=ci(/montant|amount/),iB=ci(/d[ée]bit/);
+ if(iL<0||(iM<0&&iB<0))return null;
+ const g={};
+ for(const l of L.slice(hi+1)){
+  const c=split(l,d),date=dt(c[iD]);
+  let a=iM>=0?num(c[iM]):(c[iB]?-Math.abs(num(c[iB])):NaN);
+  if(!date||isNaN(a)||a>=0)continue;
+  const k=cle(c[iL]);if(!k)continue;
+  (g[k]=g[k]||[]).push({date,a:-a});
+ }
+ const res=[];
+ for(const k in g){
+  const it=g[k].sort((x,y)=>x.date-y.date);if(it.length<2)continue;
+  const m=med(it.map(x=>x.a)),ok=it.filter(x=>Math.abs(x.a-m)<=m*.15);
+  if(ok.length<2)continue;
+  const gaps=[];for(let i=1;i<ok.length;i++)gaps.push((ok[i].date-ok[i-1].date)/864e5);
+  const mg=med(gaps);if(mg<24||mg>37)continue;
+  res.push({nom:k.toLowerCase().replace(/(^| )\w/g,s=>s.toUpperCase()),mois:m,an:m*12});
+ }
+ return res.sort((x,y)=>y.an-x.an);
+}
+function lettre(nom){
+ const j=new Date().toLocaleDateString('fr-FR');
+ return `[Ton prénom et nom]\n[Ton adresse]\n[Ton numéro client ou l'email du compte]\n\nÀ [Ville], le ${j}\n\nObjet : résiliation de mon abonnement « ${nom} »\n\nMadame, Monsieur,\n\nPar la présente, je vous informe que je résilie l'abonnement « ${nom} » souscrit à mon nom, avec effet immédiat ou, à défaut, à la prochaine échéance.\n\nMerci de cesser tout prélèvement sur mon compte et de me confirmer cette résiliation par écrit.\n\nJe vous prie d'agréer, Madame, Monsieur, mes salutations distinguées.\n\n[Signature]`;
+}
+function afficher(r){
+ const tot=$('tot'),box=$('liste');box.textContent='';
+ const faits=new Set();
+ const maj=()=>{const pot=r.reduce((s,x)=>s+x.an,0),ec=r.filter((x,i)=>faits.has(i)).reduce((s,x)=>s+x.an,0);
+  tot.textContent='';tot.hidden=false;
+  const b=document.createElement('b');b.textContent=eur(ec);
+  tot.append('Économisé sur l\'année : ',b,' sur ',eur(pot),' possibles')};
+ r.forEach((x,i)=>{
+  const c=document.createElement('div');c.className='c';
+  const t=document.createElement('h2');t.textContent=x.nom;
+  const p=document.createElement('div');p.innerHTML='<span class="an"></span> <small></small>';
+  p.firstChild.textContent=eur(x.an)+' par an';
+  p.lastChild.textContent='('+x.mois.toFixed(2).replace('.',',')+' € par mois)';
+  const lb=document.createElement('label'),cb=document.createElement('input');cb.type='checkbox';
+  cb.onchange=()=>{cb.checked?faits.add(i):faits.delete(i);maj()};
+  lb.append(cb,' Résilié');
+  const bt=document.createElement('button');bt.textContent='Lettre de résiliation';
+  const ta=document.createElement('textarea');ta.hidden=true;ta.readOnly=true;ta.value=lettre(x.nom);
+  bt.onclick=()=>{ta.hidden=!ta.hidden;if(!ta.hidden){ta.select();try{navigator.clipboard.writeText(ta.value)}catch(e){}}};
+  c.append(t,p,lb,bt,ta);box.append(c);
+ });
+ maj();
+}
+$('f').onchange=e=>{
+ const f=e.target.files[0];if(!f)return;
+ const rd=new FileReader();
+ rd.onload=()=>{
+  const r=analyser(rd.result);
+  if(!r){$('msg').textContent='Je ne reconnais pas ce fichier. Vérifie que c\'est bien un CSV de relevé.';return}
+  $('msg').textContent=r.length?r.length+' prélèvement(s) régulier(s) trouvé(s). Appuie sur « Lettre » : elle se copie toute seule.':'Aucun prélèvement régulier trouvé. Essaie un relevé couvrant au moins 3 mois.';
+  afficher(r);
+ };
+ rd.readAsText(f,'utf-8');
+};
+</script></body></html>
